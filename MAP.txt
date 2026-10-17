@@ -1,0 +1,37 @@
+THE NINE FIELDS - CURRENT RANDOM MAP
+====================================
+
+This file is regenerated every time the game starts.
+Screen coordinates start at 1 for easier reading.
+Total screens: 23
+Start dead end: 4,5
+Coin dead end: 1,6
+
+OPEN CONNECTIONS
+-----------------
+SCREEN 4,1: up to 4,2
+SCREEN 4,2: down to 4,1; up to 4,3
+SCREEN 3,3: right to 4,3
+SCREEN 4,3: left to 3,3; right to 5,3; down to 4,2
+SCREEN 5,3: left to 4,3; right to 6,3
+SCREEN 6,3: left to 5,3; right to 7,3; up to 6,4
+SCREEN 7,3: left to 6,3; up to 7,4
+SCREEN 8,3: up to 8,4
+SCREEN 5,4: right to 6,4; up to 5,5
+SCREEN 6,4: left to 5,4; down to 6,3; up to 6,5
+SCREEN 7,4: right to 8,4; down to 7,3
+SCREEN 8,4: left to 7,4; down to 8,3
+SCREEN 2,5: up to 2,6
+SCREEN 4,5: up to 4,6
+SCREEN 5,5: down to 5,4; up to 5,6
+SCREEN 6,5: down to 6,4
+SCREEN 1,6: right to 2,6
+SCREEN 2,6: left to 1,6; right to 3,6; down to 2,5
+SCREEN 3,6: left to 2,6; right to 4,6; up to 3,7
+SCREEN 4,6: left to 3,6; right to 5,6; down to 4,5
+SCREEN 5,6: left to 4,6; down to 5,5
+SCREEN 3,7: right to 4,7; down to 3,6
+SCREEN 4,7: left to 3,7
+
+Any neighboring screen not listed above is blocked by a wall.
+The minimap grows as screens are visited.

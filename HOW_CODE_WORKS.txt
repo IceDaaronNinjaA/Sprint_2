@@ -1,0 +1,269 @@
+THE NINE FIELDS - HOW THE CODE WORKS
+====================================
+
+This is a small first step toward a Legend of Zelda 1-style overworld. The
+game currently has between 20 and 25 screens arranged in an irregular shape. The connections
+and layout are randomized each run and explained in section 7 below and in
+MAP.txt.
+
+
+1. THE MAIN IDEAS
+-----------------
+
+main.py uses Arcade. Arcade opens the game window, draws sprites, reads the
+keyboard, and updates the game many times per second.
+
+The world is not one giant map. It is between 20 and 25 separate screens. The variables
+screen_column and screen_row remember which screen the player is currently on:
+
+    (0, 2) (1, 2) (2, 2)
+    (0, 1) (1, 1) (2, 1)
+    (0, 0) (1, 0) (2, 0)
+
+The game starts in the center at (1, 1).
+
+
+2. HOW A SCREEN IS BUILT
+------------------------
+
+build_screen() creates the current screen from scratch:
+
+* ground_list gets grass tiles covering the whole 768-by-576 window.
+* path_list gets a horizontal and vertical road crossing the screen.
+* obstacle_list gets the current screen's trees, rocks, bushes, and walls.
+* physics_engine is told that the player cannot walk through obstacles.
+
+The roads are centered on every edge. That is why the right edge of one
+screen lines up with the left edge of the next screen. There is always a path
+between neighboring screens.
+
+SCREEN_CONFIGS contains separate ground, obstacle, and wall data for every
+screen. That dictionary is the easiest place to start designing new rooms.
+
+The player speed is set to 3 because Arcade's Sprite.change_x and
+Sprite.change_y values are applied on each update. A large number there makes
+the player appear to jump instead of visibly move.
+
+
+3. HOW MOVEMENT WORKS
+---------------------
+
+When an arrow key or WASD key is pressed, on_key_press() gives the player a
+change_x or change_y speed. When the key is released, on_key_release() sets
+that direction back to zero.
+
+on_update() runs every frame. It first lets Arcade's PhysicsEngineSimple move
+the player and stop the player at trees and rocks.
+
+Then it checks the four edges:
+
+* Walk off the right edge: screen_column increases by one.
+* Walk off the left edge: screen_column decreases by one.
+* Walk off the top edge: screen_row increases by one.
+* Walk off the bottom edge: screen_row decreases by one.
+
+If the player is at the outside edge of the irregular world, the player is held
+inside instead. Some neighboring screen pairs are closed by the randomly
+generated maze. Those exits get a full wall gate and cannot be crossed. The
+remaining exits form a connected route through every generated screen, so a blocked
+gate means the player must go around through another screen.
+
+When an open transition is possible, build_screen() makes the next screen and
+the player is placed at the opposite edge of that new screen.
+
+
+4. HOW DRAWING WORKS
+--------------------
+
+on_draw() draws from back to front:
+
+1. Grass ground
+2. Road/path tiles
+3. Trees and rocks
+4. The player
+5. A small screen-coordinate label for testing
+
+Drawing in this order makes the player appear in front of the world.
+
+
+5. HOW TO RUN IT
+----------------
+
+From this folder, run:
+
+    python main.py
+
+Use the arrow keys or W, A, S, and D to move. Try walking through the center
+paths, going around the wall sections, and crossing several screen boundaries.
+
+There are no directional text overlays during play. Closed exits are shown in
+the world by full rows or columns of wall objects touching the edge, like a
+Zelda-style blocked passage. The open dirt paths remain visible at the other
+exits. The outside perimeter of the irregular test map uses the same
+full-wall treatment.
+
+For testing, main.py currently shows the current screen coordinate in the
+upper-left corner. Set SHOW_DEBUG_LABELS to False near the top of main.py when
+you want to hide that label.
+
+
+7. RANDOM TEXT MAP RULES
+------------------------
+
+The game displays screen numbers starting at 1. Screen 1,1 is the lower-left
+screen. The exact connections are
+randomized every time the game starts, so the old fixed map is intentionally
+not listed here.
+
+The maze is generated with a randomized depth-first search. It creates a
+spanning tree: all generated screens are reachable, but some connections are blocked
+by full wall edges. Extra connections are added afterward, creating loops and
+more branching paths so the map is easier to get lost in. The protected start
+and goal screens remain dead ends.
+
+At the beginning of each run:
+
+* The player starts on one randomly selected dead-end screen.
+* The golden coin is placed on a different randomly selected dead-end screen.
+* The nine hand-designed scenery layouts are reused and shuffled across the
+  20-25 screens.
+
+Use the screen label while testing and use the full wall edges to understand
+which directions are blocked. MAP.txt summarizes these random-map rules in a
+shorter reference.
+
+The player must walk into the golden coin to finish. Then the map is replaced
+by an end screen. Click RETURN TO MENU to start another randomized run, or use
+EXIT GAME from the menu to close the program.
+
+
+8. START MENU AND MOUSE INPUT
+-----------------------------
+
+The program opens in the menu instead of immediately starting the maze.
+START GAME uses the mouse and calls start_game(), which creates a fresh shape,
+maze, scenery arrangement, start dead end, coin dead end, and MAP.txt export.
+EXIT GAME closes the window. After collecting the coin, RETURN TO MENU calls
+return_to_menu() so the player can play a different random maze.
+
+
+9. CODE COORDINATES VERSUS DISPLAY COORDINATES
+----------------------------------------------
+
+The code stores irregular positions starting at zero. The display adds one to
+both coordinate values because people usually find screen coordinates easier
+to read. MAP.txt uses the display coordinates.
+
+
+10. FUNCTION-BY-FUNCTION GUIDE
+-----------------------------
+
+GameWindow.__init__()
+    Opens the Arcade window, creates the menu state, and prepares the player
+    and sprite lists. The random world is intentionally not generated until
+    the player clicks START GAME.
+
+GameWindow.start_game()
+    Generates a fresh shape, maze, scenery assignment, start dead end, coin
+    dead end, and MAP.txt export. It then switches from the menu to gameplay.
+
+GameWindow.return_to_menu()
+    Stops the player and switches from the end screen back to the menu.
+
+GameWindow.current_screen
+    A property that looks up the scenery template assigned to the current
+    screen. It lets the rest of the code use self.current_screen instead of
+    repeating the dictionary lookup.
+
+GameWindow.create_random_shape()
+    Chooses a number from 20 to 25, starts with one screen, and repeatedly
+    adds a screen next to an existing screen. This makes a connected,
+    irregular outline instead of a fixed square.
+
+GameWindow.create_random_screen_layouts()
+    Copies the nine scenery templates, reuses them until every generated
+    screen has one, and shuffles the result. It changes scenery placement
+    without requiring a separate hand-written layout for every screen.
+
+GameWindow.create_random_maze()
+    First creates a connected depth-first-search tree. It counts the number of
+    connections at each screen, selects two screens with only one connection,
+    and protects those as the start and coin dead ends. Finally it adds some
+    extra legal connections to create loops and alternate routes.
+
+GameWindow.display_position(position)
+    Converts the code's zero-based coordinate tuple into the one-based text
+    coordinate written into MAP.txt.
+
+GameWindow.neighbors_for(position)
+    Checks the four possible directions around a screen and returns only
+    neighbors that are part of the current irregular shape.
+
+GameWindow.neighbors()
+    Calls neighbors_for() for the screen the player is currently on. This is a
+    convenience function used by screen transitions and edge-wall creation.
+
+GameWindow.edge_is_open(current, neighbor)
+    Checks whether the pair of screens appears in the random maze's open
+    connection set. If it does not, the game draws a wall between them.
+
+GameWindow.write_current_map()
+    Writes the actual random shape, open connections, start dead end, and coin
+    dead end into MAP.txt every time a run begins.
+
+GameWindow.build_screen()
+    Clears the old screen lists, fills the background with grass, draws the
+    paths, adds scenery and walls, places the coin if this is the goal screen,
+    and rebuilds the collision engine.
+
+GameWindow.add_path_tile(texture, column, row)
+    Makes one visual path sprite and places it on the 64-pixel tile grid.
+
+GameWindow.add_obstacle(texture, column, row, scale)
+    Makes one collidable tree, rock, bush, or wall sprite and adds it to the
+    obstacle list.
+
+GameWindow.add_edge_wall(direction)
+    Fills an outside edge or blocked connection with wall objects touching the
+    screen border. Open connections deliberately do not call this function.
+
+GameWindow.on_draw()
+    Draws the current screen in layers: ground, paths, coin, obstacles,
+    player, minimap, and the optional testing label. After the coin is picked
+    up, it draws the end screen instead.
+
+GameWindow.draw_minimap()
+    Draws only visited screens and the discovered open connections. The yellow
+    square is the current screen, and green squares show places already seen.
+
+GameWindow.on_key_press(key, modifiers)
+    Starts movement by setting the player's horizontal or vertical velocity
+    when an arrow key or WASD key is pressed.
+
+GameWindow.on_key_release(key, modifiers)
+    Sets that velocity back to zero when the movement key is released.
+
+GameWindow.on_mouse_press(x, y, button, modifiers)
+    Checks whether the mouse click is inside START GAME, EXIT GAME, or RETURN
+    TO MENU and performs that button's action.
+
+GameWindow.on_update(delta_time)
+    Runs once per frame. It moves the player through the physics engine,
+    prevents movement through walls, changes screens through open edges,
+    records visited screens, checks for coin pickup, and pauses while the menu
+    or end screen is visible.
+
+main()
+    Creates GameWindow and starts Arcade's event loop. The event loop keeps
+    calling on_draw(), on_update(), and the keyboard functions until the game
+    closes.
+
+
+11. GOOD NEXT CHANGES
+---------------------
+
+* Give each generated screen its own obstacle list.
+* Replace the robot image with a hero sprite.
+* Add enemies, a sword attack, and a health system.
+* Add a camera or larger maps after the screen system feels comfortable.
+* Add a game state for caves or other special rooms.
