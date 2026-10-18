@@ -33,6 +33,15 @@ START_BUTTON_Y = 300
 EXIT_BUTTON_Y = 215
 MENU_BUTTON_Y = 220
 
+# Puzzle colors make the special objects easy to tell apart from ordinary
+# scenery.  The purple objects are gates; they are solid until their puzzle
+# in that screen has been completed.
+PUZZLE_GATE_COLOR = (155, 55, 190)
+BACKUP_BUTTON_COLOR = (70, 210, 95)
+SLIDING_BLOCK_COLOR = (235, 130, 35)
+SLIDING_TARGET_COLOR = (225, 225, 225)
+COLOR_TILE_COLORS = [(210, 55, 55), (55, 100, 220), (235, 195, 45)]
+
 # Arcade's built-in top-down tiles line up on a 64-by-64 grid and are
 # automatically included by the project's PyInstaller hook.
 GRASS_TEXTURE = ":resources:images/topdown_tanks/tileGrass1.png"
@@ -135,6 +144,19 @@ class GameWindow(arcade.Window):
         self.game_won = False
         self.end_screen_timer = 0.0
 
+        # Puzzle state is reset every time START GAME creates a new maze.
+        self.sliding_screen = None
+        self.color_screen = None
+        self.puzzle_gate_directions = {}
+        self.sliding_solved = False
+        self.color_solved = False
+        self.puzzle_block = None
+        self.puzzle_target = None
+        self.color_tiles = []
+        self.color_sequence = []
+        self.next_color_index = 0
+        self.puzzle_backup_button = None
+
         self.player = arcade.Sprite(PLAYER_TEXTURE, scale=PLAYER_SCALE)
         self.player.center_x = SCREEN_WIDTH / 2
         self.player.center_y = SCREEN_HEIGHT / 2
@@ -145,6 +167,8 @@ class GameWindow(arcade.Window):
         self.obstacle_list = arcade.SpriteList(use_spatial_hash=True)
         self.path_list = arcade.SpriteList()
         self.coin_list = arcade.SpriteList()
+        self.puzzle_visual_list = arcade.SpriteList()
+        self.puzzle_gate_list = arcade.SpriteList()
         self.coin = None
         self.physics_engine = None
 
@@ -156,9 +180,37 @@ class GameWindow(arcade.Window):
         )
         self.map_screen_count = len(self.screen_positions)
         self.screen_layouts = self.create_random_screen_layouts()
-        self.open_connections, self.start_screen, self.goal_screen = (
-            self.create_random_maze()
-        )
+        # Retry the maze generator if necessary until two ordinary rooms have
+        # exactly two opposite exits. Opposite exits prevent a player from
+        # slipping around a gate through a neighboring corner.
+        while True:
+            self.open_connections, self.start_screen, self.goal_screen = (
+                self.create_random_maze()
+            )
+            puzzle_rooms = self.puzzle_room_candidates()
+            if len(puzzle_rooms) >= 2:
+                self.sliding_screen, self.color_screen = random.sample(
+                    puzzle_rooms, 2
+                )
+                self.puzzle_gate_directions = {
+                    self.sliding_screen: self.choose_gate_direction(
+                        self.sliding_screen
+                    ),
+                    self.color_screen: self.choose_gate_direction(
+                        self.color_screen
+                    ),
+                }
+                if self.is_puzzle_maze_solvable():
+                    break
+
+        self.sliding_solved = False
+        self.color_solved = False
+        self.puzzle_block = None
+        self.puzzle_target = None
+        self.color_tiles = []
+        self.color_sequence = []
+        self.next_color_index = 0
+        self.puzzle_backup_button = None
         self.screen_column, self.screen_row = self.start_screen
         self.visited_screens = {self.start_screen}
         self.game_won = False
@@ -287,6 +339,90 @@ class GameWindow(arcade.Window):
 
         return maze_edges, start_screen, goal_screen
 
+    def puzzle_room_candidates(self):
+        """Return two-exit rooms whose exits are opposite, not diagonal."""
+        candidates = []
+        for position in self.screen_positions:
+            directions = self.open_directions(position)
+            if len(directions) != 2:
+                continue
+            horizontal = {"left", "right"}
+            vertical = {"up", "down"}
+            if set(directions) in (horizontal, vertical):
+                candidates.append(position)
+        return candidates
+
+    def open_directions(self, position):
+        """Return the directions of all currently open exits from a room."""
+        return [
+            direction for direction, neighbor in self.neighbors_for(position).items()
+            if self.edge_is_open(position, neighbor)
+        ]
+
+    def path_predecessor(self, target):
+        """Return the room immediately before target on a start-to-target path."""
+        parent = {self.start_screen: None}
+        queue = [self.start_screen]
+        while queue:
+            current = queue.pop(0)
+            if current == target:
+                return parent[current]
+            for neighbor in self.neighbors_for(current).values():
+                if self.edge_is_open(current, neighbor) and neighbor not in parent:
+                    parent[neighbor] = current
+                    queue.append(neighbor)
+        return None
+
+    def direction_to(self, position, neighbor):
+        """Return the direction from position to one adjacent neighbor."""
+        for direction, candidate in self.neighbors_for(position).items():
+            if candidate == neighbor:
+                return direction
+        return None
+
+    def choose_gate_direction(self, position):
+        """Gate the exit opposite the normal start-to-puzzle entrance."""
+        options = self.open_directions(position)
+        predecessor = self.path_predecessor(position)
+        entrance = self.direction_to(position, predecessor)
+        safe_gate_options = [direction for direction in options if direction != entrance]
+        return random.choice(safe_gate_options or options)
+
+    def reachable_screens(self, blocked_edges):
+        """Return rooms reachable from the start without crossing blocked gates."""
+        reached = {self.start_screen}
+        queue = [self.start_screen]
+        while queue:
+            current = queue.pop(0)
+            for neighbor in self.neighbors_for(current).values():
+                edge = frozenset({current, neighbor})
+                if edge in blocked_edges or neighbor in reached:
+                    continue
+                if self.edge_is_open(current, neighbor):
+                    reached.add(neighbor)
+                    queue.append(neighbor)
+        return reached
+
+    def is_puzzle_maze_solvable(self):
+        """Check that both puzzle rooms can be reached before any gate opens."""
+        blocked_edges = set()
+        for room, direction in self.puzzle_gate_directions.items():
+            neighbor = self.neighbors_for(room)[direction]
+            blocked_edges.add(frozenset({room, neighbor}))
+
+        reachable = self.reachable_screens(blocked_edges)
+        return (
+            self.sliding_screen in reachable
+            and self.color_screen in reachable
+        )
+
+    def rooms_with_two_connections(self):
+        """Return all rooms with exactly two open maze connections."""
+        return [
+            position for position in self.screen_positions
+            if sum(position in edge for edge in self.open_connections) == 2
+        ]
+
     def display_position(self, position):
         """Convert zero-based code coordinates to one-based map coordinates."""
         return f"{position[0] + 1},{position[1] + 1}"
@@ -364,6 +500,8 @@ class GameWindow(arcade.Window):
         self.path_list = arcade.SpriteList()
         self.obstacle_list = arcade.SpriteList(use_spatial_hash=True)
         self.coin_list = arcade.SpriteList()
+        self.puzzle_visual_list = arcade.SpriteList()
+        self.puzzle_gate_list = arcade.SpriteList()
         self.coin = None
         config = self.current_screen
 
@@ -391,6 +529,29 @@ class GameWindow(arcade.Window):
         # Add this screen's trees, rocks, and bushes.
         for column, row, texture, scale in config["obstacles"]:
             self.add_obstacle(texture, column, row, scale)
+
+        # Each puzzle has a visible purple gate.  It is a real obstacle until
+        # that puzzle is solved, so the player can see exactly what is locked.
+        current = (self.screen_column, self.screen_row)
+        if current == self.sliding_screen:
+            self.setup_sliding_puzzle()
+            if self.sliding_solved:
+                # Keep the completed block visibly locked on its target when
+                # the player returns to this screen.
+                self.puzzle_block.center_x = self.puzzle_target.center_x
+                self.puzzle_block.center_y = self.puzzle_target.center_y
+            else:
+                self.add_puzzle_gate()
+                self.add_backup_button()
+        elif current == self.color_screen:
+            self.setup_color_puzzle()
+            if self.color_solved:
+                # Solved color tiles stay disappeared when the room is rebuilt.
+                for tile in self.color_tiles:
+                    tile.visible = False
+            else:
+                self.add_puzzle_gate()
+                self.add_backup_button()
 
         # The goal is a collectible rather than an automatic screen change.
         # The player must walk onto the coin to finish the maze.
@@ -425,6 +586,212 @@ class GameWindow(arcade.Window):
         obstacle.center_x = column * TILE_SIZE + TILE_SIZE / 2
         obstacle.center_y = row * TILE_SIZE + TILE_SIZE / 2
         self.obstacle_list.append(obstacle)
+
+    def setup_sliding_puzzle(self):
+        """Create a block and its target for the push-block puzzle.
+
+        The block is not in the normal obstacle list because the player must
+        be able to push it.  Instead, update_sliding_puzzle moves it when the
+        player walks into it and checks whether it overlaps the target.
+        """
+        self.puzzle_target = arcade.SpriteSolidColor(
+            48, 48, color=SLIDING_TARGET_COLOR
+        )
+        target_positions = [
+            (320, 160), (320, 224), (160, 160), (480, 160),
+            (160, 224), (480, 224), (320, 352),
+        ]
+        self.find_clear_position(self.puzzle_target, target_positions)
+        self.puzzle_visual_list.append(self.puzzle_target)
+
+        self.puzzle_block = arcade.SpriteSolidColor(
+            48, 48, color=SLIDING_BLOCK_COLOR
+        )
+        block_positions = [
+            (160, 160), (160, 224), (480, 160), (480, 224),
+            (320, 160), (320, 224), (160, 352),
+        ]
+        self.find_clear_position(
+            self.puzzle_block, block_positions, [self.puzzle_target]
+        )
+        self.puzzle_visual_list.append(self.puzzle_block)
+
+    def setup_color_puzzle(self):
+        """Create three colored floor tiles that must be touched in order."""
+        self.color_sequence = list(range(len(COLOR_TILE_COLORS)))
+        random.shuffle(self.color_sequence)
+        self.next_color_index = 0
+
+        positions = [(160, 400), (320, 400), (480, 400)]
+        for tile_index, position in enumerate(positions):
+            tile = arcade.SpriteSolidColor(
+                44, 44, color=COLOR_TILE_COLORS[tile_index]
+            )
+            candidate_positions = [
+                position, (position[0], 336), (position[0], 464),
+                (96 + tile_index * 64, 400),
+            ]
+            self.find_clear_position(tile, candidate_positions, self.color_tiles)
+            self.color_tiles.append(tile)
+            self.puzzle_visual_list.append(tile)
+
+    def add_puzzle_gate(self):
+        """Place a purple wall one tile inside one of the room's exits."""
+        direction = self.puzzle_gate_directions[
+            (self.screen_column, self.screen_row)
+        ]
+        if direction in ("left", "right"):
+            column = 1 if direction == "left" else SCREEN_WIDTH // TILE_SIZE - 2
+            positions = [
+                (column, row) for row in range(SCREEN_HEIGHT // TILE_SIZE)
+            ]
+        else:
+            row = 1 if direction == "down" else SCREEN_HEIGHT // TILE_SIZE - 2
+            positions = [
+                (column, row) for column in range(SCREEN_WIDTH // TILE_SIZE)
+            ]
+
+        for column, row in positions:
+            gate = arcade.SpriteSolidColor(
+                TILE_SIZE, TILE_SIZE, color=PUZZLE_GATE_COLOR
+            )
+            gate.center_x = column * TILE_SIZE + TILE_SIZE / 2
+            gate.center_y = row * TILE_SIZE + TILE_SIZE / 2
+
+            # Do not leave a normal wall, tree, or rock underneath the gate.
+            # Otherwise that ordinary object would remain after the purple
+            # gate opens and make it look as if part of the gate stayed closed.
+            for obstacle in list(self.obstacle_list):
+                if arcade.check_for_collision(gate, obstacle):
+                    obstacle.remove_from_sprite_lists()
+
+            self.puzzle_gate_list.append(gate)
+            self.obstacle_list.append(gate)
+
+    def add_backup_button(self):
+        """Place an emergency solve button on the far side of the gate."""
+        direction = self.puzzle_gate_directions[
+            (self.screen_column, self.screen_row)
+        ]
+        if direction == "left":
+            center_x, center_y = 32, SCREEN_HEIGHT / 2
+        elif direction == "right":
+            center_x, center_y = SCREEN_WIDTH - 32, SCREEN_HEIGHT / 2
+        elif direction == "down":
+            center_x, center_y = SCREEN_WIDTH / 2, 32
+        else:
+            center_x, center_y = SCREEN_WIDTH / 2, SCREEN_HEIGHT - 32
+
+        self.puzzle_backup_button = arcade.SpriteSolidColor(
+            32, 32, color=BACKUP_BUTTON_COLOR
+        )
+        self.puzzle_backup_button.center_x = center_x
+        self.puzzle_backup_button.center_y = center_y
+        self.puzzle_visual_list.append(self.puzzle_backup_button)
+
+    def complete_current_puzzle(self):
+        """Mark the current puzzle solved and permanently open its gate."""
+        current = (self.screen_column, self.screen_row)
+        if current == self.sliding_screen:
+            self.sliding_solved = True
+            if self.puzzle_block is not None and self.puzzle_target is not None:
+                self.puzzle_block.center_x = self.puzzle_target.center_x
+                self.puzzle_block.center_y = self.puzzle_target.center_y
+        elif current == self.color_screen:
+            self.color_solved = True
+            for tile in self.color_tiles:
+                tile.visible = False
+        else:
+            return
+
+        if self.puzzle_backup_button is not None:
+            self.puzzle_backup_button.remove_from_sprite_lists()
+            self.puzzle_backup_button = None
+        self.remove_puzzle_gate()
+
+    def find_clear_position(self, sprite, candidates, occupied=None):
+        """Put a puzzle sprite at the first candidate that touches no object."""
+        occupied = occupied or []
+        for center_x, center_y in candidates:
+            sprite.center_x = center_x
+            sprite.center_y = center_y
+            hits_obstacle = any(
+                arcade.check_for_collision(sprite, obstacle)
+                for obstacle in self.obstacle_list
+            )
+            hits_puzzle = any(
+                arcade.check_for_collision(sprite, other) for other in occupied
+            )
+            if not hits_obstacle and not hits_puzzle:
+                return
+
+        # The generated layouts normally have a clear candidate. This fallback
+        # keeps the sprite visible if a future layout fills every candidate.
+        sprite.center_x, sprite.center_y = candidates[0]
+
+    def choose_gate_direction(self, position):
+        """Choose one of a puzzle room's two open exits for its gate."""
+        options = [
+            direction for direction, neighbor in self.neighbors_for(position).items()
+            if self.edge_is_open(position, neighbor)
+        ]
+        return random.choice(options)
+
+    def remove_puzzle_gate(self):
+        """Open the current room's gate and rebuild collision handling."""
+        for gate in self.puzzle_gate_list:
+            gate.remove_from_sprite_lists()
+        self.puzzle_gate_list = arcade.SpriteList()
+        self.physics_engine = arcade.PhysicsEngineSimple(
+            self.player, self.obstacle_list
+        )
+
+    def update_sliding_puzzle(self):
+        """Push the orange block and lock it when it reaches the gray target."""
+        if self.puzzle_block is None or self.sliding_solved:
+            return
+        if arcade.check_for_collision(self.player, self.puzzle_block):
+            # Push along whichever direction the player is currently moving.
+            if abs(self.player.change_x) >= abs(self.player.change_y):
+                self.puzzle_block.center_x += self.player.change_x
+            else:
+                self.puzzle_block.center_y += self.player.change_y
+
+            margin = TILE_SIZE / 2 + 2
+            self.puzzle_block.center_x = max(
+                margin, min(SCREEN_WIDTH - margin, self.puzzle_block.center_x)
+            )
+            self.puzzle_block.center_y = max(
+                margin, min(SCREEN_HEIGHT - margin, self.puzzle_block.center_y)
+            )
+
+        if arcade.check_for_collision(self.puzzle_block, self.puzzle_target):
+            self.puzzle_block.center_x = self.puzzle_target.center_x
+            self.puzzle_block.center_y = self.puzzle_target.center_y
+            self.complete_current_puzzle()
+
+    def reset_color_puzzle(self):
+        """Put all color tiles back when the player touches the wrong tile."""
+        self.next_color_index = 0
+        for tile in self.color_tiles:
+            tile.visible = True
+
+    def update_color_puzzle(self):
+        """Remove correctly ordered tiles and open the gate after the last one."""
+        if not self.color_tiles or self.color_solved:
+            return
+
+        for tile_index, tile in enumerate(self.color_tiles):
+            if not tile.visible or not arcade.check_for_collision(self.player, tile):
+                continue
+            if tile_index == self.color_sequence[self.next_color_index]:
+                tile.visible = False
+                self.next_color_index += 1
+                if self.next_color_index == len(self.color_sequence):
+                    self.complete_current_puzzle()
+            else:
+                self.reset_color_puzzle()
+            break
 
     def neighbors(self):
         """Return neighboring screens for the current irregular map cell."""
@@ -485,9 +852,26 @@ class GameWindow(arcade.Window):
 
         self.ground_list.draw()
         self.path_list.draw()
+        self.puzzle_visual_list.draw()
         self.coin_list.draw()
         self.obstacle_list.draw()
         self.player_list.draw()
+        self.draw_puzzle_instructions()
+
+        # The emergency switch is intentionally explained only when the
+        # player reaches it, keeping the normal screen uncluttered.
+        if (
+            self.puzzle_backup_button is not None
+            and arcade.check_for_collision(self.player, self.puzzle_backup_button)
+        ):
+            arcade.draw_text(
+                "Press E to unlock",
+                self.puzzle_backup_button.center_x,
+                self.puzzle_backup_button.top + 8,
+                arcade.color.WHITE,
+                14,
+                anchor_x="center",
+            )
         self.draw_minimap()
 
         # Keep only the screen coordinate visible while testing navigation.
@@ -500,6 +884,33 @@ class GameWindow(arcade.Window):
                 SCREEN_HEIGHT - 28,
                 arcade.color.WHITE,
                 16,
+            )
+
+    def draw_puzzle_instructions(self):
+        """Show the objective only while the player is in an unsolved puzzle."""
+        current = (self.screen_column, self.screen_row)
+        if current == self.sliding_screen and not self.sliding_solved:
+            arcade.draw_lbwh_rectangle_filled(
+                130, 12, 508, 42, arcade.color.BLACK
+            )
+            arcade.draw_text(
+                "PUSH THE ORANGE BLOCK ONTO THE GRAY TARGET",
+                SCREEN_WIDTH / 2,
+                26,
+                arcade.color.WHITE,
+                14,
+                anchor_x="center",
+            )
+        elif current == self.color_screen and not self.color_solved:
+            arcade.draw_lbwh_rectangle_filled(
+                170, 12, 428, 42, arcade.color.BLACK
+            )
+            arcade.draw_text(
+                "STEP ON THE COLOR TILES IN THE CORRECT ORDER",
+                190,
+                26,
+                arcade.color.WHITE,
+                13,
             )
 
     def draw_button(self, label, center_y):
@@ -585,21 +996,32 @@ class GameWindow(arcade.Window):
                 origin_y + (position[1] - min_row) * cell_size + cell_size / 2,
             )
 
-        # Only draw connections between screens the player has discovered.
-        for edge in self.open_connections:
-            first, second = tuple(edge)
-            if first in self.visited_screens and second in self.visited_screens:
-                x1, y1 = center(first)
-                x2, y2 = center(second)
+        # Draw every open exit leaving a visited room. The line can end at an
+        # unvisited room, which lets the player see paths they have not taken.
+        drawn_edges = set()
+        for position in self.visited_screens:
+            for neighbor in self.neighbors_for(position).values():
+                edge = frozenset({position, neighbor})
+                if edge in drawn_edges or not self.edge_is_open(position, neighbor):
+                    continue
+                drawn_edges.add(edge)
+                x1, y1 = center(position)
+                x2, y2 = center(neighbor)
                 arcade.draw_line(x1, y1, x2, y2, arcade.color.DARK_GRAY, 3)
 
-        for position in self.visited_screens:
+        # Special rooms use their own colors after they have been discovered.
+        # Keeping this set limited to visited rooms prevents the minimap from
+        # revealing the puzzle and coin locations at the start of a run.
+        special_colors = {
+            self.start_screen: arcade.color.BLUE,
+            self.goal_screen: arcade.color.RED,
+            self.sliding_screen: arcade.color.PURPLE,
+            self.color_screen: arcade.color.ORANGE,
+        }
+        visible_positions = self.visited_screens
+        for position in visible_positions:
             x, y = center(position)
-            color = (
-                arcade.color.YELLOW
-                if position == (self.screen_column, self.screen_row)
-                else arcade.color.GREEN
-            )
+            color = special_colors.get(position, arcade.color.GREEN)
             arcade.draw_lbwh_rectangle_filled(
                 x - (cell_size - 3) / 2,
                 y - (cell_size - 3) / 2,
@@ -607,9 +1029,25 @@ class GameWindow(arcade.Window):
                 cell_size - 3,
                 color,
             )
+            if position == (self.screen_column, self.screen_row):
+                arcade.draw_lbwh_rectangle_outline(
+                    x - (cell_size - 3) / 2,
+                    y - (cell_size - 3) / 2,
+                    cell_size - 3,
+                    cell_size - 3,
+                    arcade.color.YELLOW,
+                    3,
+                )
 
     def on_key_press(self, key, modifiers):
         """Start movement when an arrow key or WASD key is pressed."""
+        if key in (arcade.key.E, arcade.key.SPACE):
+            if (
+                self.puzzle_backup_button is not None
+                and arcade.check_for_collision(self.player, self.puzzle_backup_button)
+            ):
+                self.complete_current_puzzle()
+            return
         if key in (arcade.key.UP, arcade.key.W):
             self.player.change_y = PLAYER_SPEED
         elif key in (arcade.key.DOWN, arcade.key.S):
@@ -636,6 +1074,11 @@ class GameWindow(arcade.Window):
             return
 
         self.physics_engine.update()
+
+        # Puzzle updates happen after normal movement so the player can push
+        # the block or step on a tile using the same controls as the maze.
+        self.update_sliding_puzzle()
+        self.update_color_puzzle()
 
         current = (self.screen_column, self.screen_row)
         neighbors = self.neighbors()

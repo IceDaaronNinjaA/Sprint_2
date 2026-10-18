@@ -1,0 +1,31 @@
+THE NINE FIELDS - PLAYER VERSION
+================================
+
+1. Extract the ZIP file.
+2. Open the extracted The_Nine_Fields folder.
+3. Double-click main.exe.
+
+No Python installation is required. Keep main.exe and the _internal folder
+together in the same folder.
+
+CONTROLS
+--------
+Arrow keys or W/A/S/D: Move
+E or Space: Use the emergency green switch when standing beside it
+Mouse: Click menu buttons
+
+PUZZLES
+-------
+Sliding puzzle: Push the orange block onto the gray target.
+Color puzzle: Step on the red, blue, and yellow tiles in the correct order.
+The order is discovered by experimenting. A wrong tile resets the sequence.
+
+Purple gates show that a puzzle must be completed. If you enter a room from
+the wrong side, walk to the green emergency switch. Stand beside it and press
+E or Space to unlock that room.
+
+The map is randomized each time START GAME is clicked. The minimap reveals
+visited screens and the open paths leaving them as you explore.
+
+If Windows shows a security warning for a locally built program, choose the
+option to run it only if you trust the person who gave you this ZIP file.

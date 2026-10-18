@@ -30,7 +30,10 @@ build_screen() creates the current screen from scratch:
 
 * ground_list gets grass tiles covering the whole 768-by-576 window.
 * path_list gets a horizontal and vertical road crossing the screen.
-* obstacle_list gets the current screen's trees, rocks, bushes, and walls.
+* obstacle_list gets the current screen's trees, rocks, bushes, walls, and
+  purple puzzle gates.
+* puzzle_visual_list gets the orange sliding block, its gray target, and the
+  colored floor tiles when the current screen contains a puzzle.
 * physics_engine is told that the player cannot walk through obstacles.
 
 The roads are centered on every edge. That is why the right edge of one
@@ -80,8 +83,9 @@ on_draw() draws from back to front:
 1. Grass ground
 2. Road/path tiles
 3. Trees and rocks
-4. The player
-5. A small screen-coordinate label for testing
+4. Puzzle objects and the coin
+5. Walls and the player
+6. The minimap and a small screen-coordinate label for testing
 
 Drawing in this order makes the player appear in front of the world.
 
@@ -137,7 +141,41 @@ by an end screen. Click RETURN TO MENU to start another randomized run, or use
 EXIT GAME from the menu to close the program.
 
 
-8. START MENU AND MOUSE INPUT
+8. PUZZLE ROOMS AND GATES
+--------------------------
+
+Each new randomized run chooses two ordinary screens with exactly two open
+connections for puzzles. Their exits must be opposite, such as left/right or
+up/down, so a player cannot slip around the gate through a neighboring corner.
+The gate is placed on the exit that is not used by the normal start-to-puzzle
+route. This guarantees the player enters from the open side, reaches the
+puzzle, and can open the other exit afterward.
+
+The sliding-block room has an orange block and a light-gray target. Walk into
+the orange block to push it. When the block overlaps the target, it snaps into
+place and stays locked there. The purple wall one tile inside one room edge is
+the gate for this puzzle. It is a real collision object until the block is
+solved, then it is removed and that exit opens.
+
+The color-tile room has red, blue, and yellow floor tiles. The order is
+randomized each run. Walk over them in the correct order; each correctly
+visited tile disappears. Touching a tile out of order restores all of the
+tiles and starts the sequence over. After the last correct tile disappears,
+the room's purple gate opens permanently for that run.
+
+As a safety backup, an emergency green switch is placed on the far side of
+each locked gate. If the player reaches it, the game displays "Press E to
+unlock". Pressing E or Space completes that room's puzzle and opens the gate.
+This prevents a bad entry route from making the run impossible.
+
+setup_sliding_puzzle() and setup_color_puzzle() create the puzzle sprites.
+add_puzzle_gate() creates the purple collidable gate, while
+remove_puzzle_gate() removes it and rebuilds the physics engine. The two
+update methods are called every frame from on_update() so the puzzles use the
+same keyboard movement as the rest of the game.
+
+
+9. START MENU AND MOUSE INPUT
 -----------------------------
 
 The program opens in the menu instead of immediately starting the maze.
@@ -147,7 +185,7 @@ EXIT GAME closes the window. After collecting the coin, RETURN TO MENU calls
 return_to_menu() so the player can play a different random maze.
 
 
-9. CODE COORDINATES VERSUS DISPLAY COORDINATES
+10. CODE COORDINATES VERSUS DISPLAY COORDINATES
 ----------------------------------------------
 
 The code stores irregular positions starting at zero. The display adds one to
@@ -155,7 +193,7 @@ both coordinate values because people usually find screen coordinates easier
 to read. MAP.txt uses the display coordinates.
 
 
-10. FUNCTION-BY-FUNCTION GUIDE
+11. FUNCTION-BY-FUNCTION GUIDE
 -----------------------------
 
 GameWindow.__init__()
@@ -165,7 +203,8 @@ GameWindow.__init__()
 
 GameWindow.start_game()
     Generates a fresh shape, maze, scenery assignment, start dead end, coin
-    dead end, and MAP.txt export. It then switches from the menu to gameplay.
+    dead end, two puzzle rooms, and MAP.txt export. It then switches from the
+    menu to gameplay.
 
 GameWindow.return_to_menu()
     Stops the player and switches from the end screen back to the menu.
@@ -223,6 +262,57 @@ GameWindow.add_obstacle(texture, column, row, scale)
     Makes one collidable tree, rock, bush, or wall sprite and adds it to the
     obstacle list.
 
+GameWindow.setup_sliding_puzzle()
+    Creates the orange movable block and gray target. The block is kept out of
+    the normal obstacle list so the player can push it.
+
+GameWindow.setup_color_puzzle()
+    Creates the three colored floor tiles and randomizes the required order.
+    Tiles stay visible until stepped on correctly.
+
+GameWindow.add_puzzle_gate()
+    Adds a row or column of purple wall objects one tile inside one of the
+    puzzle room's two exits. The gate is both a visual clue and a collision
+    barrier.
+
+GameWindow.remove_puzzle_gate()
+    Removes the purple gate after a puzzle is solved and rebuilds the physics
+    engine so the player can immediately use the newly opened path.
+
+GameWindow.update_sliding_puzzle()
+    Pushes the orange block in the direction the player is moving, keeps it on
+    screen, and locks it onto the target when they overlap.
+
+GameWindow.reset_color_puzzle()
+    Restores all color tiles and resets the expected color index after a wrong
+    tile is touched.
+
+GameWindow.update_color_puzzle()
+    Checks which tile the player is touching. A correct tile disappears and
+    advances the sequence; a wrong tile resets it; the final correct tile
+    opens the purple gate.
+
+GameWindow.add_backup_button()
+    Places the emergency green switch on the blocked side of the gate.
+
+GameWindow.complete_current_puzzle()
+    Finishes either puzzle, removes the emergency switch, opens the gate, and
+    preserves the solved state for the rest of the run.
+
+GameWindow.draw_puzzle_instructions()
+    Shows the current puzzle objective only inside an unsolved puzzle room.
+    The color room explains that the tiles must be stepped on in order without
+    revealing the randomized sequence.
+
+GameWindow.find_clear_position(sprite, candidates, occupied)
+    Tries several puzzle positions and keeps the first one that does not
+    overlap the room's scenery or another puzzle object. This prevents a
+    generated tree, rock, or wall from making a puzzle unsolvable.
+
+GameWindow.choose_gate_direction(position)
+    Chooses the exit that is not the start-to-puzzle entrance, so the player
+    cannot begin on the wrong side of a locked puzzle gate.
+
 GameWindow.add_edge_wall(direction)
     Fills an outside edge or blocked connection with wall objects touching the
     screen border. Open connections deliberately do not call this function.
@@ -233,8 +323,11 @@ GameWindow.on_draw()
     up, it draws the end screen instead.
 
 GameWindow.draw_minimap()
-    Draws only visited screens and the discovered open connections. The yellow
-    square is the current screen, and green squares show places already seen.
+    Draws visited screens and every open exit leaving them, including paths
+    leading to rooms not visited yet. Once discovered, the start room is blue,
+    the coin room is red, the sliding puzzle room is purple, and the color
+    puzzle room is orange. A yellow outline marks the current room. Undiscovered
+    special rooms remain hidden until visited.
 
 GameWindow.on_key_press(key, modifiers)
     Starts movement by setting the player's horizontal or vertical velocity
@@ -259,7 +352,7 @@ main()
     closes.
 
 
-11. GOOD NEXT CHANGES
+12. GOOD NEXT CHANGES
 ---------------------
 
 * Give each generated screen its own obstacle list.
